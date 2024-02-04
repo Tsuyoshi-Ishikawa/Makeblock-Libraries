@@ -166,13 +166,13 @@ void MeGyro::setpin(uint8_t AD0, uint8_t INT)
 void MeGyro::begin(void)
 {
   gSensitivity = 65.5; //for 500 deg/s, check data sheet
-  gx = 0;
-  gy = 0;
+  gx = 0; // gxとはy軸を中心にしたx軸の角度
+  gy = 0; // gyとはx軸を中心にしたy軸の角度
   gz = 0;
-  gyrX = 0;
-  gyrY = 0;
-  gyrZ = 0;
-  accX = 0;
+  gyrX = 0; // gyrXはx軸を中心にした時の角速度。y軸やz軸がどのくらい動いたかを示す。
+  gyrY = 0; // gyrYはy軸を中心にした時の角速度。x軸やz軸がどのくらい動いたかを示す。
+  gyrZ = 0; // gyrZはz軸を中心にした時の角速度。x軸やy軸がどのくらい動いたかを示す。
+  accX = 0; 
   accY = 0;
   accZ = 0;
   gyrXoffs = 0;
@@ -207,33 +207,43 @@ void MeGyro::begin(void)
 void MeGyro::update(void)
 {
   static unsigned long	last_time = 0;
-  int8_t return_value;
+  int8_t return_value; // readDataのstatus codeみたいな値を返すところ(readDataの返り値に説明あり)
   double dt, filter_coefficient;
   /* read imu data */
   return_value = readData(0x3b, i2cData, 14);
-  if(return_value != 0)
+  if(return_value != 0) // readDataの返り値が0はsuccess
   {
     return;
   }
 
   double ax, ay;
   /* assemble 16 bit sensor data */
+  // 加速度センサの値を16bitに結合
   accX = ( (i2cData[0] << 8) | i2cData[1] );
   accY = ( (i2cData[2] << 8) | i2cData[3] );
   accZ = ( (i2cData[4] << 8) | i2cData[5] );  
+
+  // ジャイロセンサの値を16bitに結合
+  // gyrXはx軸を中心にした時の角速度。y軸やz軸がどのくらい動いたかを示す。
+  // gyrYはy軸を中心にした時の角速度。x軸やz軸がどのくらい動いたかを示す。
+  // gyrZはz軸を中心にした時の角速度。x軸やy軸がどのくらい動いたかを示す。
   gyrX = ( ( (i2cData[8] << 8) | i2cData[9] ) - gyrXoffs) / gSensitivity;
   gyrY = ( ( (i2cData[10] << 8) | i2cData[11] ) - gyrYoffs) / gSensitivity;
   gyrZ = ( ( (i2cData[12] << 8) | i2cData[13] ) - gyrZoffs) / gSensitivity;  
+
+  // 加速度センサの値を角度に変換
   ax = atan2(accX, sqrt( pow(accY, 2) + pow(accZ, 2) ) ) * 180 / 3.1415926;
   ay = atan2(accY, sqrt( pow(accX, 2) + pow(accZ, 2) ) ) * 180 / 3.1415926;  
 
   dt = (double)(millis() - last_time) / 1000;
   last_time = millis();
 
+  // おそらくgx,gy,gzはジャイロセンサの軸でそれを補正している模様
+  // This part integrates the gyroscope data to estimate the change in angles (gx, gy, gz).
   if(accZ > 0)
   {
-    gx = gx - gyrY * dt;
-    gy = gy + gyrX * dt;
+    gx = gx - gyrY * dt; // gxとはy軸を中心にしたx軸の角度。gyrYはy軸を中心とした時の角速度。dtは経過時間。
+    gy = gy + gyrX * dt; // gyとはx軸を中心にしたy軸の角度。gyrXはx軸を中心とした時の角速度。dtは経過時間。
   }
   else
   {
@@ -291,12 +301,16 @@ void MeGyro::fast_update(void)
 
   double ax, ay;
   /* assemble 16 bit sensor data */
+  // 
   accX = ( (i2cData[0] << 8) | i2cData[1] );
   accY = ( (i2cData[2] << 8) | i2cData[3] );
-  accZ = ( (i2cData[4] << 8) | i2cData[5] );  
+  accZ = ( (i2cData[4] << 8) | i2cData[5] );
+
   gyrX = ( ( (i2cData[8] << 8) | i2cData[9] ) - gyrXoffs) / gSensitivity;
   gyrY = ( ( (i2cData[10] << 8) | i2cData[11] ) - gyrYoffs) / gSensitivity;
   gyrZ = ( ( (i2cData[12] << 8) | i2cData[13] ) - gyrZoffs) / gSensitivity;  
+
+
   ax = atan2(accX, sqrt( pow(accY, 2) + pow(accZ, 2) ) ) * 180 / 3.1415926;
   ay = atan2(accY, sqrt( pow(accX, 2) + pow(accZ, 2) ) ) * 180 / 3.1415926;  
 

@@ -47,8 +47,8 @@ Me7SegmentDisplay seg;
 MePort generalDevice;
 MeLEDMatrix ledMx;
 MeInfraredReceiver *ir = NULL;     //PORT_6
-MeGyro gyro_ext(0,0x68);           //external gryo sensor
-MeCompass Compass;
+MeGyro gyro_ext(0,0x68);           //external gryo sensor ジャイロセンサー https://support.makeblock.com/hc/en-us/articles/12880946059159-About-Me-3-Axis-Accelerometer-and-Gyro-Sensor-for-Ultimate-2-0
+MeCompass Compass;                 //compass sensor コンパスセンサー
 MeJoystick joystick;
 MeStepperOnBoard steppers[4] = {MeStepperOnBoard(1),MeStepperOnBoard(2),MeStepperOnBoard(3),MeStepperOnBoard(4)};
 MeBuzzer buzzer;
@@ -132,7 +132,7 @@ int16_t LineFollowFlag=0;
 #define DATA_SERIAL3                           3
 
 uint8_t command_index = 0;
-uint8_t megapi_mode = BLUETOOTH_MODE;
+uint8_t megapi_mode = BLUETOOTH_MODE; // これでultimate2.0のモードを切り替える
 uint8_t index = 0;
 uint8_t dataLen;
 uint8_t modulesLen=0;
@@ -174,8 +174,9 @@ boolean blink_flag = false;
 
 String mVersion = "0e.01.018";
 //////////////////////////////////////////////////////////////////////////////////////
+// RELAX_ANGLEを0ではなく-1にしているのは、-1だと毎回不安定になって、常にバランスを取ろうとするようになるからだと思う。
 float RELAX_ANGLE = -1;                    //Natural balance angle,should be adjustment according to your own car
-#define PWM_MIN_OFFSET   0
+#define PWM_MIN_OFFSET   0 // PWM_MIN_OFFSETは信号の位相を調整するためのもの。PWM_MIN_OFFSETが大きいほど、モーターの回転が遅くなる。
 
 #define VERSION                0
 #define ULTRASONIC_SENSOR      1
@@ -257,11 +258,19 @@ float RELAX_ANGLE = -1;                    //Natural balance angle,should be adj
 
 typedef struct
 {
-  double P, I, D;
+  double P, I, D; // PID制御のP,I,Dに対してかける係数。あらかじめ設定される
   double Setpoint, Output, Integral,differential, last_error;
 } PID;
+// Setpointは目標値。self balanceではここは不変になる。void reset(void)でスピードと旋回は0となっており、角度はRELAX_ANGLEになっている。
+// Outputは今回の出力値(次の入力に利用される)、last_errorとIntegralとdifferentialを使って計算される。
+// last_errorは前回の誤差(角度誤差、スピード誤差など)
+// Integralは前回のエラーの時間積分値
+// differentialは前回のエラー時間微分値
 
 PID  PID_angle, PID_speed, PID_turn;
+// PID_angleは角度のPID制御、PID_speedは速度のPID制御、PID_turnは旋回のPID制御
+// PID_angle.Setpointはy軸を中心にした時のx軸の理想角度
+// PID_turnは左側に旋回するときは正の値、右側に旋回するときは負の値になる。PID_turn.Setpoint = joy_x_temp;からわかる
 
 /**
  * \par Function
@@ -885,7 +894,7 @@ void writeEnd(void)
  * \par Others
  *    None
  */
-void writeSerial(uint8_t c)
+void writeSerial(uint8_t c) // bluetoothでデータを送信する、スマホ側で受信することになると思う
 {
   if(BluetoothSource == DATA_SERIAL)
   {
@@ -916,7 +925,7 @@ void writeSerial(uint8_t c)
  * \par Others
  *    None
  */
-void readSerial(void)
+void readSerial(void) // シリアルポートからデータを読み込んでいる。ここではblueToothでスマホアプリからデータを受け取るときに使う。
 {
   isAvailable = false;
   if(Serial.available() > 0)
@@ -956,7 +965,7 @@ void readSerial(void)
  * \par Others
  *    None
  */
-void parseData(void)
+void parseData(void) // bluethoothから受け取ったデータがbufferにあるので、それを読み取ってコマンドを実行する
 {
   isStart = false;
   uint8_t idx = readBuffer(3);
@@ -967,6 +976,10 @@ void parseData(void)
   {
     case GET:
       {
+        // センサーからデータを読み取る。センサーはRJ25ポートに接続されている。
+        // https://www.cnx-software.com/2023/04/23/makeblock-ultimate-2-0-review-a-multi-function-10-in-1-educational-robot-kit/#megapi-shield-for-rj25
+        // 下記を見ればわかるが、SPI通信でデータをやり取りしていることがわかる。
+        // https://support.makeblock.com/hc/en-us/articles/4412894483095-About-MegaPi
         readSensor(device);
         writeEnd();
       }
@@ -1106,7 +1119,9 @@ void sendString(String s)
  */
 void sendFloat(float value)
 { 
-  writeSerial(2);
+  writeSerial(2); // おそらく、データ送信の開始を示している。
+
+  // データをバイトに変換して送信している。
   val.floatVal = value;
   writeSerial(val.byteVal[0]);
   writeSerial(val.byteVal[1]);
@@ -1739,7 +1754,7 @@ void readSensor(uint8_t device)
   writeSerial(command_index);
   switch(device)
   {
-    case ULTRASONIC_SENSOR:
+    case ULTRASONIC_SENSOR: // 超音波センサーからデータを読み取る
       {
         if(us == NULL)
         {
@@ -1750,8 +1765,8 @@ void readSensor(uint8_t device)
           delete us;
           us = new MeUltrasonicSensor(port);
         }
-        value = (float)us->distanceCm();
-        sendFloat(value);
+        value = (float)us->distanceCm(); // 超音波センサーから距離を取得する
+        sendFloat(value); // シリアルポートにデータを送信する(これはbluetoothでデータを送信することになりスマホアプリで受信することになる)
       }
       break;
     case TEMPERATURE_SENSOR:
@@ -2189,12 +2204,12 @@ void readSensor(uint8_t device)
  */
 void PID_angle_compute(void)   //PID
 {
-  CompAngleX = -gyro_ext.getAngleX();
-  double error = CompAngleX - PID_angle.Setpoint;
-  PID_angle.Integral += error;
+  CompAngleX = -gyro_ext.getAngleX(); // y軸を中心にした時のx軸の角度を取得して、正負を逆にする
+  double error = CompAngleX - PID_angle.Setpoint; // y軸を中心にした時のx軸の目標角度と、現在の角度の差を計算(P制御で利用する)
+  PID_angle.Integral += error; // 前回までのエラーに今回のエラーを加算する
   PID_angle.Integral = constrain(PID_angle.Integral,-100,100); 
-  PID_angle.differential = angle_speed;
-  PID_angle.Output = PID_angle.P * error + PID_angle.I * PID_angle.Integral + PID_angle.D * PID_angle.differential;
+  PID_angle.differential = angle_speed; // angle_speedは前後の傾きのスピード(ジャイロ)を意味する。それは時間あたりにどれだけの角度が変化するかを意味する。
+  PID_angle.Output = PID_angle.P * error + PID_angle.I * PID_angle.Integral + PID_angle.D * PID_angle.differential; // PID制御の出力を計算する
   if(PID_angle.Output > 0)
   {
     PID_angle.Output = PID_angle.Output + PWM_MIN_OFFSET;
@@ -2204,8 +2219,9 @@ void PID_angle_compute(void)   //PID
     PID_angle.Output = PID_angle.Output - PWM_MIN_OFFSET;
   }
 
-  double pwm_left = PID_angle.Output - PID_turn.Output;
-  double pwm_right = -PID_angle.Output - PID_turn.Output;
+  // BALANCED_MODEの場合はPID_turn.Outputは常に0になる
+  double pwm_left = PID_angle.Output - PID_turn.Output; // どのくらい傾きたいか - どのくらい旋回したいか
+  double pwm_right = -PID_angle.Output - PID_turn.Output; // どのくらい傾きたいか - どのくらい旋回したいか(左右逆になるのでマイナスをつける)
 
 #ifdef DEBUG_INFO
   Serial.print("Relay: ");
@@ -2223,8 +2239,8 @@ void PID_angle_compute(void)   //PID
   pwm_left = constrain(pwm_left, -255, 255);
   pwm_right = constrain(pwm_right, -255, 255);
 
-  encoders[0].setMotorPwm(pwm_left);
-  encoders[1].setMotorPwm(pwm_right);
+  encoders[0].setMotorPwm(pwm_left); // port 1にPWMを出力
+  encoders[1].setMotorPwm(pwm_right); // port 2にPWMを出力
 }
 
 /**
@@ -2243,11 +2259,15 @@ void PID_angle_compute(void)   //PID
  */
 void PID_speed_compute(void)
 {
-  double speed_now = (encoders[1].getCurrentSpeed() - encoders[0].getCurrentSpeed())/2;
+  double speed_now = (encoders[1].getCurrentSpeed() - encoders[0].getCurrentSpeed())/2; // 左右のモーターの速度の平均を取得する
 
+  // ジョイコンによる操作がない(BALANCE_MODE)場合は、PID_speed.Setpointは0になるので
+  // last_speed_setpoint_filterは常に0になる
+  // また move_flag = false;になる
   last_speed_setpoint_filter  = last_speed_setpoint_filter  * 0.8;
   last_speed_setpoint_filter  += PID_speed.Setpoint * 0.2;
  
+  // BALANCE_MODEではmove_flagは常にfalseになるので通らない
   if((move_flag == true) && (abs(speed_now) < 8) && (PID_speed.Setpoint == 0))
   {
     move_flag = false;
@@ -2255,8 +2275,8 @@ void PID_speed_compute(void)
     PID_speed.Integral = speed_Integral_average;
   }
 
-  double error = speed_now - last_speed_setpoint_filter;
-  PID_speed.Integral += error;
+  double error = speed_now - last_speed_setpoint_filter; // BALENCE_MODEの場合はerrorは常にspeed_nowになる
+  PID_speed.Integral += error; // 前回までのエラーに今回のエラーを加算する(エラーの積分)。どんどん大きくなる。
 
   if(move_flag == true) 
   { 
@@ -2267,9 +2287,9 @@ void PID_speed_compute(void)
   else
   {  
     PID_speed.Integral = constrain(PID_speed.Integral , -2000, 2000);
-    PID_speed.Output = PID_speed.P * speed_now + PID_speed.I * PID_speed.Integral;
+    PID_speed.Output = PID_speed.P * speed_now + PID_speed.I * PID_speed.Integral; // 次のスピードの出力を計算する。PID_speed.PもPID_speed.Iも正なので、どんどん大きくなる。ダメじゃね？
     PID_speed.Output = constrain(PID_speed.Output , -10.0, 10.0);
-    speed_Integral_average = 0.8 * speed_Integral_average + 0.2 * PID_speed.Integral;
+    speed_Integral_average = 0.8 * speed_Integral_average + 0.2 * PID_speed.Integral; // BALANCE_MODEでもspeed_Integral_averageは利用されていない
   }
   
 #ifdef DEBUG_INFO
@@ -2360,7 +2380,7 @@ void reset(void)
  * \par Others
  *    None
  */
-void parseGcode(char * cmd)
+void parseGcode(char * cmd)  // deprecatedぽい
 {
   char * tmp;
   char * str;
@@ -2444,7 +2464,7 @@ void parseGcode(char * cmd)
  * \par Others
  *    None
  */
-void parseCmd(char * cmd)
+void parseCmd(char * cmd) // deprecatedぽい
 {
   if((cmd[0]=='g') || (cmd[0]=='G'))
   { 
@@ -2467,19 +2487,27 @@ void parseCmd(char * cmd)
  * \par Others
  *    None
  */
+// megapi_mode == BALANCED_MODEの時にloop()で呼ばれる
 void balanced_model(void)
 {
   reset();
   if(start_flag == true)
   {
-    if((millis() - lasttime_angle) > 10)
+    if((millis() - lasttime_angle) > 10) // 10msごとに角度を制御する
     {
+      // PID_angle_computeでは、angleのためのPID制御として、
+      // setMotorPwmで進行方向のスピードの調整をしている。
       PID_angle_compute();
       lasttime_angle = millis();
     }    
-    if((millis() - lasttime_speed) > 100)
+    if((millis() - lasttime_speed) > 100) // 100msごとにスピードを制御する
     {
+      // PID_speed_computeではスピードのPID制御を行って次のスピードを計算する
+      // 次のスピードから理想の角度(PID_angle.Setpoint)を修正する
       PID_speed_compute();
+
+      // (前回のターン * 0.8 + 今回の理想ターン * 0.2)を今回のターンとする
+      // ジョイコンによる操作がないかぎり、理想のターン(PID_turn.Setpoint)は0になる
       last_turn_setpoint_filter  = last_turn_setpoint_filter * 0.8;
       last_turn_setpoint_filter  += PID_turn.Setpoint * 0.2;
       PID_turn.Output = last_turn_setpoint_filter;
@@ -2850,10 +2878,10 @@ void setup()
  */
 void loop()
 {
-  currentTime = millis()/1000.0-lastTime;
-  keyPressed = buttonSensor.pressed();
+  currentTime = millis()/1000.0-lastTime; // 前回のloopの時間情報がlastTimeに入っている
+  keyPressed = buttonSensor.pressed(); // ボタンが押されているかどうかを取得
 
-  if(millis() - blink_time > 1000)
+  if(millis() - blink_time > 1000) // 1秒ごとにLEDなどのoutputを点滅させるためにblink_timeを管理している
   {
     blink_time = millis();
     blink_flag = !blink_flag;
@@ -2862,13 +2890,13 @@ void loop()
 
   if(ir != NULL)
   {
-    IrProcess();
+    IrProcess(); // IRリモコンのボタン(赤外線受信機)が押されたかどうかを取得
   }
 
   for(int i=0;i<4;i++)
   {
-    steppers[i].update();
-    encoders[i].loop();
+    steppers[i].update(); // ステッピングモータの状態を更新
+    encoders[i].loop(); // エンコーダの状態を更新。エンコーダーとはアナログからデジタルに変換してマイコンに伝える。その部品(モーターなど)に搭載されていることが一般的
   }
 
 //  while(Serial.available() > 0)
@@ -2884,13 +2912,13 @@ void loop()
 //    }
 //  }
 
-  readSerial();
-  while(isAvailable)
+  readSerial(); // ここではblueToothのデータを読み込むために使われている
+  while(isAvailable) // blueToothからのデータがある場合、一つずつデータ(どういう指示があったか)を読み込んでparseData()で処理する
   {
     unsigned char c = serialRead & 0xff;
-    if((c == 0x55) && (isStart == false))
+    if((c == 0x55) && (isStart == false)) // 0x55が送られてきた場合は新しいデータの開始
     {
-      if(prevc == 0xff)
+      if(prevc == 0xff) // 0xffが前回送られてきた場合は、新しいデータの開始
       {
         index=1;
         isStart = true;
@@ -2901,37 +2929,46 @@ void loop()
       prevc = c;
       if(isStart)
       {
-        if(index == 2)
+        if(index == 2) // データ開始をしているするパケットの次にはデータ長が入っている
         {
           dataLen = c; 
         }
-        else if(index > 2)
+        else if(index > 2) // データ長を読み込んだ後は徐々にデータを読み込む(dataLenが-1されていく)、それをdataLenが0になるまで続ける
         {
           dataLen--;
         }
-        writeBuffer(index,c);
+        writeBuffer(index,c); // データをバッファに書き込む、indexはバッファの位置、parseData()で使う
       }
     }
     index++;
-    if(index > 51)
+    if(index > 51) // max buffer sizeが52なので、それ以上のデータが送られてきた場合は、データを破棄する
     {
       index=0; 
       isStart=false;
     }
-    if(isStart && (dataLen == 0) && (index > 3))
+    if(isStart && (dataLen == 0) && (index > 3)) // データ長が0になった場合は、データをパースする
     { 
       isStart = false;
-      parseData(); 
+      parseData(); // parseData()でデータを処理しており、センサーからのデータを取得していたりする。
       index=0;
     }
-    readSerial();
+    readSerial(); // シリアルポートのデータを読み込むことで次のデータを読み込む
   }
 
+  // Compassはおそらく角度センサーの値を取得している。
+  // 周囲の磁場の強さを検出し、新しい環境でも正確に角度を測定することができます
+  // https://makex.shop/items/5e8498be0fe7194977d97b54
+  // https://www.makeblock.com.cn/en/project/me-compass
   if(Compass.getPort() != 0)
   {
-    Compass.getAngle();
+    Compass.getAngle(); // Calculate the yaw angle by the calibrated sensor value.
   }
+
+  // ジャイロセンサーのY軸の値を取得、y軸でのジャイロなので、ロボットが前後に傾いているかどうかを判定するために使われる。
+  // angle_speedに保存して、バランスの制御で飲み利用する模様(PID_angle_compute)
+  // https://www.marutsu.co.jp/sv/murata_lp/gyro/
   angle_speed = gyro_ext.getGyroY();
+
   if(megapi_mode == BLUETOOTH_MODE)
   {
     if(millis() - update_sensor > 10)
@@ -2942,12 +2979,14 @@ void loop()
   }
   else if(megapi_mode == AUTOMATIC_OBSTACLE_AVOIDANCE_MODE)
   { 
-    ultrCarProcess();
+    ultrCarProcess(); // 超音波センサーで障害物を検知して、自動で避ける
   }
   else if(megapi_mode == BALANCED_MODE)
   {
-    gyro_ext.fast_update();
-    balanced_model();
+    gyro_ext.fast_update(); // ジャイロセンサーの値を更新して保存している
+    balanced_model(); // バランスカーの制御
+
+    // ここでは超音波センサーの値を取得している(while(isAvailable)の部分)が、バランスカーの制御には使われていない
   }
   else if(megapi_mode == LINE_FOLLOW_MODE)
   {
